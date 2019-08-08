@@ -1,0 +1,1185 @@
+---
+title: 'A Monte Carlo Study of ω Coefficients'
+subtitle: 'Why Broad Ability Constructs Can Be Precisely Estimated Despite Low ω Subscale Values'
+author: "W. Joel Schneider & Catherine Fiorello"
+date: "6/24/2019"
+output: 
+  html_document: 
+    fig_height: 6
+    fig_width: 10
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, warning = F, dev = "svg")
+library(simstandard)
+library(tidyverse)
+```
+
+```{r}
+# Random beta function from mean and SD
+rbeta_ms <- function(n = 1, mu = 0.5, sigma = 0.025, digits = 3) {
+  # Return mu if sigma is 0
+  if (sigma == 0) return(rep(mu, n))
+  # Check to make sure mu is between 0 and 1
+  if (mu > 1 | mu < 0) stop("mu must be between 0 and 1.")
+  # variance
+  v <- sigma ^ 2
+  # Check to make sure the variance is not impossibly large
+  if (v > mu * (1 - mu)) stop("sigma is too large.")
+  
+  # Hits
+  a <- mu * ((mu * (1 - mu) / v) - 1)
+  # Misses
+  b <- (1 - mu) * a / mu
+  # Random data
+  round(rbeta(n, a, b), digits = digits)
+}
+
+# tibble(x = rbeta_ms(10000, 0.75, 0.05)) %>% 
+#   ggplot(aes(x)) +
+#   geom_density() +
+#   xlim(0,1)
+
+# Helper function to make indictors with randomized coefficients
+
+make_indicators <- function(latent, indicators = NULL, mu = .8, sigma = 0.02, k = 3) {
+  if (is.null(indicators)) indicators <- paste0(latent,"_",1:k)
+  if (length(mu) == 1) mu <- rep(mu, length(indicators))
+  if (length(sigma) == 1) sigma <- rep(sigma, length(indicators))
+  
+  loadings <- pmap_dbl(list(mu = mu,sigma = sigma), rbeta_ms)
+  ll <- paste0(loadings," * ", indicators, collapse = " + ")
+  paste0(latent, " =~ ", ll)
+}
+
+# make_indicators("Gl", mu = 0.80, sigma = 0.03, k = 3)
+
+# Generate model with randomized coefficients
+
+make_model <- function(d_measurement, d_structural = NULL) {
+  if (!is.null(d_structural)) {
+    structural_model <- d_structural %>%
+    gather("latent", "mu",-Dependent) %>%
+    filter(!is.na(mu)) %>%
+    mutate(load = map_dbl(mu, rbeta_ms, n = 1)) %>%
+    select(-mu) %>%
+    mutate(l = paste0(load, " * ", latent)) %>%
+    group_by(Dependent) %>%
+    summarise(ll = paste0(l, collapse = " + ")) %>%
+    mutate(l = paste0(Dependent, " ~ ", ll)) %>%
+    pull(l)
+  } else structural_model = ""
+  
+  
+  measurement_model_broad <- d_measurement %>%
+    select(latent:k) %>%
+    pmap_chr(make_indicators)
+  
+  
+  
+  
+  d_g <- d_measurement %>%
+    filter(!is.na(g_mu)) %>%
+    select(latent, g_mu, g_sigma)
+  
+  measurment_model_g <- make_indicators(
+    "g",
+    indicators = d_g$latent,
+    mu = d_g$g_mu,
+    sigma = d_g$g_sigma
+  )
+  
+  
+  
+  model <-
+    c(measurment_model_g,
+      measurement_model_broad,
+      structural_model)
+  
+  paste0(model, collapse = "\n")
+}
+```
+
+
+```{r, eval = FALSE}
+tibble::tribble(
+  ~Broad, ~Loading,
+   "Gwm",     0.59,
+   "Gwm",     0.61,
+   "Gwm",     0.63,
+   "Gwm",     0.71,
+   "Gwm",     0.72,
+   "Gwm",     0.69,
+   "Gwm",     0.78,
+   "Gwm",     0.76,
+   "Gwm",      0.7,
+   "Gwm",     0.64,
+    "Gf",     0.62,
+    "Gf",     0.68,
+    "Gf",     0.74,
+    "Gf",     0.72,
+    "Gf",     0.62,
+    "Gf",     0.68,
+    "Gf",     0.52,
+    "Gf",     0.53,
+    "Gf",     0.61,
+    "Gf",     0.71,
+    "Gf",     0.73,
+    "Gs",      0.6,
+    "Gs",     0.55,
+    "Gs",     0.66,
+    "Gs",     0.74,
+    "Gs",     0.39,
+    "Gs",     0.58,
+    "Gs",     0.51,
+    "Gc",     0.73,
+    "Gc",     0.62,
+    "Gc",     0.74,
+    "Gc",     0.75,
+    "Gc",     0.82,
+    "Gc",     0.86,
+    "Gc",     0.83,
+    "Gc",     0.72,
+    "Gc",     0.82,
+    "Gc",     0.87,
+    "Gc",     0.82,
+    "Gc",     0.85,
+    "Gc",     0.86,
+    "Gv",     0.45,
+    "Gv",     0.49,
+    "Gv",     0.66,
+    "Gv",     0.78,
+    "Gv",     0.68,
+    "Gv",      0.6,
+    "Gv",     0.21,
+    "Gv",     0.59,
+    "Gv",     0.73,
+    "Gv",     0.78,
+    "Gv",     0.66,
+    "Gv",     0.39,
+    "Gv",     0.75,
+    "Gv",      0.6,
+    "Gl",     0.55,
+    "Gl",     0.73,
+    "Gl",     0.65,
+    "Gl",     0.54,
+    "Gl",      0.8,
+    "Gl",     0.77,
+    "Gl",      0.7,
+    "Gl",     0.59
+  ) %>% 
+  group_by(Broad) %>% 
+  nest() %>% 
+  mutate(b = map(data, function(x) MASS::fitdistr(pull(x, Loading), densfun = "beta",start =  list(shape1 = 1, shape2 = 1)))) %>% 
+  mutate(a = map(b, "shape1"))
+
+
+```
+
+
+
+```{r, eval = FALSE}
+k <- 30
+d_measurement <- tibble::tribble(
+          ~latent, ~mu, ~sigma, ~k, ~g_mu, ~g_sigma,
+             "Gf", 0.8,   0,  k,  0.92,     0,
+             "Gc", 0.8,   0,  k,  0.90,     0,
+             "Gv", 0.7,   0,  k,  0.85,     0,
+             "Ga", 0.8,   0,  k,  0.85,     0,
+            "Gwm", 0.8,   0,  k,  0.85,     0,
+             "Gs", 0.8,   0,  k,  0.70,     0,
+             "Gr", 0.8,   0,  k,  0.70,     0,
+             "Gl", 0.8,   0,  k,  0.80,     0)
+
+make_model(d_measurement) %>% sim_standardized(errors = F, composites = T, factor_scores = T) %>% select(g, g_Composite, g_FS) %>% cor %>% `^`(2)
+```
+
+```{r MISTRA, eval = F}
+MISTRA <- matrix(c(
+	1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # CAB vocabulary
+	729,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # CAB proverbs
+	711,609,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # CAB spelling
+	809,711,733,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # HB vocabulary
+	723,624,641,701,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # WAIS information
+	641,596,491,616,640,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # WAIS comprehension
+	823,728,693,801,767,714,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # WAIS vocabulary
+	582,566,484,564,634,570,663,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # WAIS similarities
+	664,641,626,681,636,488,632,527,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # HB pedigrees
+	601,464,520,488,575,486,548,472,571,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # HB raven
+	481,481,451,532,495,450,544,403,474,334,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # HB things categories
+	531,524,418,529,507,545,589,508,513,409,612,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # HB different uses
+	432,428,362,430,481,404,466,443,455,484,347,358,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # WAIS picture completion
+	357,397,265,333,405,416,387,321,403,398,316,319,445,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # WAIS picture arrangement
+	252,246,173,259,324,300,265,276,319,393,258,286,435,339,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # WAIS object assembly
+	415,378,465,430,439,305,416,362,485,398,363,366,228,185,112,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # CAB memory span
+	349,365,449,409,381,253,350,372,478,306,321,282,335,197,252,329,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # CAB speed of closure
+	590,515,652,648,545,452,581,488,616,461,553,527,368,260,202,484,493,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # CAB word fluency
+	598,542,622,626,539,504,618,474,569,478,499,477,377,325,220,429,410,717,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # HB word beginnings/endings
+	388,382,461,392,338,276,404,324,451,388,320,283,258,171,117,597,356,466,484,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # WAIS digit span
+	342,324,367,370,389,246,335,275,436,314,206,334,237,202,168,336,336,370,233,288,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # CAB associative memory
+	533,523,468,503,487,450,555,461,506,444,360,461,411,345,223,295,334,446,444,345,439,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # CAB meaningful memory
+	261,225,132,247,229,186,217,179,266,258,142,166,217,154,171,92,67,195,182,110,260,309,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # HB immediate visual memory
+	254,224,177,250,232,217,256,156,269,237,196,187,195,138,176,137,132,239,259,203,209,324,531,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # HB delayed visual memory
+	405,387,487,408,346,239,341,310,562,369,277,355,282,180,167,373,448,493,365,323,334,337,158,222,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # CAB perceptual speed
+	388,401,391,475,422,312,384,339,560,309,408,423,415,348,418,283,449,455,324,190,292,321,178,145,547,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # HB identical pictures
+	129,152,184,219,222,186,171,168,411,358,165,176,284,252,353,237,257,269,229,126,233,212,176,175,335,375,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # HB card rotation
+	371,366,346,373,373,363,395,314,514,473,290,340,340,301,298,349,344,426,368,296,342,358,201,205,374,361,509,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0, # HB cubes
+	581,542,661,595,585,452,570,462,658,527,445,475,333,261,212,546,471,612,516,495,403,427,153,239,589,416,258,436,1000,0,0,0,0,0,0,0,0,0,0,0,0,0, # CAB numerical ability
+	436,432,580,551,457,317,436,329,513,329,372,353,213,146,133,442,415,582,460,376,314,350,131,187,526,406,203,236,712,1000,0,0,0,0,0,0,0,0,0,0,0,0, # HB subtraction/multiplication
+	255,273,208,265,265,224,247,234,354,205,216,268,231,167,239,204,226,212,143,198,260,245,167,160,306,325,217,272,312,278,1000,0,0,0,0,0,0,0,0,0,0,0, # HB lines and dots
+	456,401,511,501,407,314,422,357,525,418,305,394,344,211,195,430,326,532,402,404,372,372,236,267,579,526,219,349,562,547,265,1000,0,0,0,0,0,0,0,0,0,0, # WAIS digit symbol
+	578,561,612,572,619,483,598,517,617,522,359,402,357,352,205,457,345,581,535,454,410,475,149,225,426,322,199,404,684,539,241,465,1000,0,0,0,0,0,0,0,0,0, # WAIS arithmetic
+	301,275,269,302,294,248,288,257,494,438,233,316,300,239,301,308,271,323,290,248,284,281,218,173,475,460,594,513,375,295,255,384,299,1000,0,0,0,0,0,0,0,0, # CAB spatial ability
+	507,416,448,466,447,432,450,374,471,427,313,431,367,310,296,357,362,442,402,298,316,372,102,166,430,435,286,470,521,354,261,445,443,322,1000,0,0,0,0,0,0,0, # Flexibility of closure
+	397,416,270,342,386,438,416,354,374,418,288,367,391,388,415,177,217,269,315,248,137,373,146,171,165,322,313,392,301,138,256,195,353,294,387,1000,0,0,0,0,0,0, # CAB mechanical ability
+	528,491,513,494,485,358,505,416,607,533,389,395,385,320,260,400,455,503,470,378,343,423,203,214,468,421,313,462,561,390,239,391,520,402,463,312,1000,0,0,0,0,0, # CAB inductive reasoning
+	257,283,241,283,290,267,260,229,379,389,161,229,348,341,369,239,285,249,248,202,240,268,167,141,331,360,469,415,255,137,220,194,246,450,308,393,342,1000,0,0,0,0, # HB mental rotation
+	405,395,315,405,447,375,394,367,517,478,385,396,458,363,500,313,327,393,346,282,311,336,197,267,413,512,480,501,439,272,336,374,399,442,448,460,435,450,1000,0,0,0, # HB paper formboard
+	465,399,454,472,472,334,428,362,573,528,368,409,427,384,444,376,359,464,409,303,348,350,241,242,482,550,493,469,470,403,311,459,421,473,485,386,467,488,571,1000,0,0, # HB hidden patterns
+	410,388,325,397,449,349,421,349,531,539,290,366,396,354,439,283,359,384,374,276,314,392,247,265,344,384,426,536,429,232,215,302,451,424,395,550,470,454,590,455,1000,0, # HB paper folding
+	428,405,360,398,426,381,430,361,551,587,342,378,436,376,501,335,308,405,401,303,289,376,207,233,495,479,470,545,453,272,309,409,464,466,500,458,498,479,643,602,312,1000), nrow = 42, byrow = TRUE) # WAIS block design
+colnames(MISTRA) <- rownames(MISTRA) <- MISTRANames <- c("CAB vocabulary", "CAB proverbs", "CAB spelling", "HB vocabulary", "WAIS information", "WAIS comprehension", "WAIS vocabulary", "WAIS similarities", "HB pedigrees", "HB raven", "HB things categories", "HB different uses", "WAIS picture completion", "WAIS picture arrangement", "WAIS object assembly", "CAB memory span", "CAB speed of closure", "CAB word fluency", "HB word beginnings/endings", "WAIS digit span", "CAB associative memory", "CAB meaningful memory", "HB immediate visual memory", "HB delayed visual memory", "CAB perceptual speed", "HB identical pictures", "HB card rotation", "HB cubes", "CAB numerical ability", "HB subtraction/multiplication", "HB lines and dots", "WAIS digit symbol", "WAIS arithmetic", "CAB spatial ability", "Flexibility of closure", "CAB mechanical ability", "CAB inductive reasoning", "HB mental rotation", "HB paper formboard", "HB hidden patterns", "HB paper folding", "WAIS block design")
+
+MISTRA <- (t(MISTRA) + MISTRA) / 1000
+diag(MISTRA) <- 1
+
+psych::fa.parallel(MISTRA, 139 * 2)
+
+psych::fa(MISTRA, 9, n.obs = 139 * 2, fm = "pa") %>% psych::fa.sort(.) %>% print(cut = 0.2)
+
+
+
+
+
+```
+
+
+```{r Greenaway, eval = F}
+rtext <- "
+Wrat 1 
+Voc 0.652 1 
+Sim 0.486 0.688 1 
+Info 0.548 0.711 0.607 1 
+Name 0.378 0.485 0.466 0.580 1 
+Cowat 0.399 0.445 0.413 0.356 0.272 1 
+Cat 0.269 0.260 0.272 0.230 0.271 0.417 1 
+PC 0.237 0.236 0.272 0.284 0.344 0.266 0.184 1 
+BD 0.240 0.259 0.407 0.291 0.314 0.216 0.225 0.393 1 
+MR 0.381 0.443 0.502 0.466 0.400 0.301 0.290 0.379 0.519 1 
+Rey 0.252 0.193 0.203 0.162 0.196 0.171 0.040 0.197 0.338 0.351 1 
+VisD 0.292 0.265 0.338 0.240 0.193 0.178 0.157 0.228 0.333 0.443 0.216 1 
+Arith 0.319 0.369 0.376 0.414 0.311 0.260 0.225 0.231 0.389 0.470 0.283 0.310 1 
+DS 0.467 0.388 0.318 0.359 0.270 0.402 0.153 0.135 0.239 0.317 0.238 0.223 0.345 1 
+LNS 0.427 0.393 0.343 0.300 0.263 0.396 0.265 0.223 0.284 0.357 0.172 0.309 0.378 0.460 1 
+TMTA 0.087 0.105 0.117 0.109 0.136 0.224 0.238 0.177 0.280 0.254 0.077 0.105 0.209 0.067 0.206 1 
+TMTB 0.312 0.289 0.288 0.252 0.238 0.429 0.397 0.227 0.366 0.375 0.222 0.256 0.401 0.320 0.367 0.459 1 
+SS 0.208 0.298 0.323 0.250 0.184 0.307 0.222 0.333 0.373 0.389 0.235 0.237 0.328 0.228 0.355 0.310 0.440 1 
+DigS 0.288 0.343 0.345 0.232 0.203 0.413 0.324 0.173 0.291 0.335 0.161 0.327 0.281 0.218 0.358 0.346 0.508 0.504 1"
+
+dnames <- str_remove_all(rtext, "[0-9\\. ]")  %>% 
+  str_remove("\\n") %>% 
+  str_split("\n") %>% 
+  `[[`(1) 
+
+
+R <- str_remove_all(rtext, "[A-z]") %>% 
+  str_remove_all("\n ") %>% str_split(" ") %>% 
+  `[[`(1) %>% 
+  as.double() %>% 
+  lavaan::lav_matrix_lower2full() %>% 
+  magrittr::set_colnames(dnames) %>% 
+  magrittr::set_rownames(dnames)
+
+psych::fa(R, 4, n.obs = 535, fm = "pa") %>% psych::fa.sort() %>% print(cut = 0.2)
+psych::fa.parallel(R, n.obs = 576)
+library(lavaan)
+m <- "
+g =~ Gc + Gv + Gwm + Gs + Gr
+Gc =~ Voc + Sim + Info + Name
+Gr =~ Cowat + Cat 
+Gv =~ PC + BD + Rey + VisD
+Gwm =~ DS + LNS
+Gs =~ TMTA + TMTB + SS + DigS
+TMTB ~~  TMTA
+"
+fit <- sem(m,sample.cov = R, sample.nobs = 576)
+summary(fit, standardized = T, fit.measures = T)
+lavaan::standardizedsolution(fit)
+
+```
+
+# Factor Loadings Across All Studies
+
+```{r}
+ll <- readxl::read_xlsx("Loadings.xlsx") %>% 
+  mutate(g = if_else(str_detect(Broad,"g."), "g to Broad Factor Loading", "Broad Factor to Test Loading"),
+         Broad = stringr::str_replace(Broad, "g\\.","."),
+         
+         Broad = forcats::fct_reorder(Broad, Loading, .fun = median),
+         Battery = case_when(
+           stringr::str_detect(Test, "WISC") ~ "Wech",
+           stringr::str_detect(Test, "WAIS") ~ "Wech",
+           stringr::str_detect(Test, "WJ") ~ "WJ",
+           stringr::str_detect(Test, "DAS") ~ "DAS",
+           stringr::str_detect(Test, "KABC") ~ "Kauf",
+           stringr::str_detect(Test, "KAIT") ~ "Kauf",
+           stringr::str_detect(Test, "K-BIT") ~ "Kauf",
+           TRUE ~ "Other") %>% factor(levels = c("DAS","Kauf","Wech", "WJ", "Other")))
+# ll %>% group_by(Broad,Subtest) %>%  summarise(m = min(Loading)) %>% View
+d_median <- ll %>% 
+  group_by(Broad, g) %>% 
+  summarise(Loading = median(Loading)) %>% 
+  arrange(g, Loading) %>% 
+  ungroup %>% 
+  mutate(Broad = fct_inorder(Broad))
+
+d_median %>% pull(Broad)
+# ll$Test %>% unique
+ll %>% 
+  ggplot(aes(Broad,Loading)) +
+  # geom_boxplot(outlier.shape = NA) + 
+  geom_violin(color = "white", scale = "width", width = 0.8, fill = "gray70", alpha = 0.8) +
+  geom_segment(data = d_median, aes(x = as.numeric(Broad) - 0.5 + if_else(g == "g to Broad Factor Loading",-8,0), xend = as.numeric(Broad) + 0.5 + if_else(g == "g to Broad Factor Loading",-8,0), yend = Loading), color = "white") +
+  ggbeeswarm::geom_quasirandom(aes(color = Battery), pch = 16, size = 0.8, width = 0.35) +
+  geom_text(data = d_median, aes(label = formatC(Loading,2, format = "f") %>% str_remove("^0")), vjust = -0.3, family = "Equity Text A Tab", color = "gray20", size = 7) +
+  facet_grid(cols = vars(g),scales = "free") + 
+  scale_y_continuous("CFA Loading (with Medians)", limits = c(0,1), breaks = seq(0,1,0.2), expand = c(0,0.06)) + 
+  scale_x_discrete(NULL) +
+  theme_light(base_family = "Equity Text A Tab",base_size = 24) +
+  theme(legend.position = "top", legend.box.spacing = unit(0,"cm"), title = element_text(size = 15), legend.box.margin = margin(0,0,0,0)) + 
+  scale_color_discrete(guide = ggplot2::guide_legend(override.aes = list(size = 4)))
+  
+ggsave("Loadings.svg",width = 10, height = 6)
+ll %>% group_by(g, Broad) %>% 
+  summarise(l = mean(Loading))
+
+ll %>% filter(g == "Broad Factor to Test Loading") %>% group_by(Broad) %>% 
+  sample_n(3) %>% 
+  select(Broad, Loading) %>% 
+  mutate(Loading = as.character(formatC(Loading, 2, format = "f")) %>% str_remove("^0")) %>% 
+  summarise(Loading = paste(Loading, collapse = ", ")) %>% 
+  mutate(l = paste0("\\def\\l",Broad,"{{",Loading,"}}:")) %>% 
+  pull(l) %>% 
+  paste0(collapse = "\n") %>% 
+  cat
+```
+
+## Gc Tests
+
+
+```{r Gc, eval = F}
+ll %>% filter(Broad == "Gc") %>%
+  mutate(Subtest = fct_lump(Subtest,10) %>% as.character()) %>%
+  mutate(Subtest = ifelse(Battery == "DAS" &
+                            Subtest == "Similarities", "Other", Subtest)) %>%
+  mutate(Subtest = ifelse(
+    Battery == "DAS" &
+      Subtest == "Verbal Comprehension",
+    "Other",
+    Subtest
+  )) %>%
+  mutate(Subtest = ifelse(
+    Battery == "DAS" &
+      Subtest == "Verbal Comprehension",
+    "Other",
+    Subtest
+  )) %>%
+    mutate(Subtest = ifelse(
+    Battery == "Other",
+    "Other",
+    Subtest
+  )) %>%
+  mutate(Subtest = fct_reorder(str_replace(Subtest," ","\n"), Loading, .fun = mean)) %>% 
+  ggplot(aes(Subtest, Loading)) +
+  geom_violin(
+    draw_quantiles = 0.5,
+    color = "gray80",
+    scale = "width",
+    width = 0.8
+  ) +
+  ggbeeswarm::geom_quasirandom(aes(color = Battery),
+                               pch = 16,
+                               size = 1,
+                               width = 0.35)  +
+  scale_y_continuous("Loading", limits = c(0, 1), breaks = seq(0, 1, 0.1)) + 
+  scale_x_discrete(NULL) + 
+  theme(legend.position = "top")
+```
+
+## Gf Tests 
+
+```{r Gf, eval = F}
+ll %>% filter(Broad == "Gf") %>%
+  mutate(Subtest = fct_lump(Subtest,7) %>% as.character()) %>%
+  mutate(Subtest = fct_reorder(str_replace(Subtest," ","\n"), Loading)) %>% 
+  ggplot(aes(Subtest, Loading)) +
+  geom_violin(
+    draw_quantiles = 0.5,
+    color = "gray80",
+    scale = "width",
+    width = 0.8
+  ) +
+  ggbeeswarm::geom_quasirandom(aes(color = Battery),
+                               pch = 16,
+                               size = 1,
+                               width = 0.35)  +
+  scale_y_continuous("Loading", limits = c(0, 1), breaks = seq(0, 1, 0.1)) + 
+  scale_x_discrete(NULL) + 
+  theme(legend.position = "top")
+```
+
+## Gv Tests
+
+```{r Gv, eval = F}
+ll %>% filter(Broad == "Gv") %>%
+  mutate(Subtest = fct_lump(Subtest,9) %>% as.character()) %>%
+  mutate(Subtest = fct_reorder(str_replace(Subtest," ","\n"), Loading, .fun = mean)) %>% 
+  ggplot(aes(Subtest, Loading)) +
+  geom_violin(
+    draw_quantiles = 0.5,
+    color = "gray80",
+    scale = "width",
+    width = 0.8
+  ) +
+  ggbeeswarm::geom_quasirandom(aes(color = Battery),
+                               pch = 16,
+                               size = 1,
+                               width = 0.35)  +
+  scale_y_continuous("Loading", limits = c(0, 1), breaks = seq(0, 1, 0.1)) + 
+  scale_x_discrete(NULL) + 
+  theme(legend.position = "top")
+```
+
+## Ga Tests
+
+```{r Ga, eval = F}
+ll %>% filter(Broad == "Ga") %>%
+  mutate(Subtest = fct_lump(Subtest,2) %>% as.character()) %>%
+  mutate(Subtest = fct_reorder(str_replace(Subtest," ","\n"), Loading, .fun = mean)) %>% 
+  ggplot(aes(Subtest, Loading)) +
+  geom_violin(
+    draw_quantiles = 0.5,
+    color = "gray80",
+    scale = "width",
+    width = 0.8
+  ) +
+  ggbeeswarm::geom_quasirandom(aes(color = Battery),
+                               pch = 16,
+                               size = 1,
+                               width = 0.35)  +
+  scale_y_continuous("Loading", limits = c(0, 1), breaks = seq(0, 1, 0.1)) + 
+  scale_x_discrete(NULL) + 
+  theme(legend.position = "top")
+```
+
+## Gwm Tests
+
+```{r Gwm, eval = F}
+ll %>% filter(Broad == "Gwm") %>%
+  mutate(Subtest = fct_lump(Subtest,7) %>% as.character()) %>%
+  mutate(Subtest = fct_reorder(str_replace(Subtest," ","\n"), Loading, .fun = mean)) %>% 
+  ggplot(aes(Subtest, Loading)) +
+  geom_violin(
+    draw_quantiles = 0.5,
+    color = "gray80",
+    scale = "width",
+    width = 0.8
+  ) +
+  ggbeeswarm::geom_quasirandom(aes(color = Battery),
+                               pch = 16,
+                               size = 1,
+                               width = 0.35)  +
+  scale_y_continuous("Loading", limits = c(0, 1), breaks = seq(0, 1, 0.1)) + 
+  scale_x_discrete(NULL) + 
+  theme(legend.position = "top")
+```
+
+## Gl Tests
+
+```{r Gl, eval = F}
+ll %>% filter(Broad == "Gl") %>%
+  mutate(Subtest = str_remove(Subtest, " Delayed")) %>% 
+  mutate(Subtest = fct_lump(Subtest,4) %>% as.character()) %>%
+  mutate(Subtest = fct_reorder(str_replace(Subtest," ","\n"), Loading, .fun = mean)) %>% 
+  ggplot(aes(Subtest, Loading)) +
+  geom_violin(
+    draw_quantiles = 0.5,
+    color = "gray80",
+    scale = "width",
+    width = 0.8
+  ) +
+  ggbeeswarm::geom_quasirandom(aes(color = Battery),
+                               pch = 16,
+                               size = 1,
+                               width = 0.35)  +
+  scale_y_continuous("Loading", limits = c(0, 1), breaks = seq(0, 1, 0.1)) + 
+  scale_x_discrete(NULL) + 
+  theme(legend.position = "top")
+```
+
+## Gr Tests
+
+```{r Gr, eval = F}
+ll %>% filter(Broad == "Gr") %>%
+  mutate(Subtest = str_remove(Subtest, " Delayed")) %>% 
+  mutate(Subtest = fct_lump(Subtest,1) %>% as.character()) %>%
+  mutate(Subtest = fct_reorder(str_replace(Subtest," ","\n"), Loading, .fun = mean)) %>% 
+  ggplot(aes(Subtest, Loading)) +
+  geom_violin(
+    draw_quantiles = 0.5,
+    color = "gray80",
+    scale = "width",
+    width = 0.8
+  ) +
+  ggbeeswarm::geom_quasirandom(aes(color = Battery),
+                               pch = 16,
+                               size = 1,
+                               width = 0.35)  +
+  scale_y_continuous("Loading", limits = c(0, 1), breaks = seq(0, 1, 0.1)) + 
+  scale_x_discrete(NULL) + 
+  theme(legend.position = "top")
+```
+
+## Gs Tests
+
+```{r Gs, eval = F}
+ll %>% filter(Broad == "Gs") %>%
+  mutate(Subtest = str_remove(Subtest, " Delayed")) %>% 
+  mutate(Subtest = fct_lump(Subtest,6) %>% as.character()) %>%
+  mutate(Subtest = fct_reorder(str_replace(Subtest," ","\n"), Loading, .fun = mean)) %>% 
+  ggplot(aes(Subtest, Loading)) +
+  geom_violin(
+    draw_quantiles = 0.5,
+    color = "gray80",
+    scale = "width",
+    width = 0.8
+  ) +
+  ggbeeswarm::geom_quasirandom(aes(color = Battery),
+                               pch = 16,
+                               size = 1,
+                               width = 0.35)  +
+  scale_y_continuous("Loading", limits = c(0, 1), breaks = seq(0, 1, 0.1)) + 
+  scale_x_discrete(NULL) + 
+  theme(legend.position = "top")
+```
+
+
+```{r}
+d_g <- filter(ll, g == "g to Broad Factor Loading") %>% mutate(Broad = as.character(Broad) %>% str_remove("\\.") %>% factor(levels = c("Gc", "Gwm","Gs","Gf","Gl","Gr", "Gv", "Ga")))
+d_b <- filter(ll, g == "Broad Factor to Test Loading") %>% 
+  mutate(Broad = factor(Broad, levels = c("Gc", "Gwm","Gs","Gf","Gl","Gr", "Gv", "Ga")))
+
+d_all <- bind_rows(d_g, d_b)
+library(extrafont)
+extrafont::fonts()
+loadfonts(device = "win", quiet = FALSE)
+extrafont::fonts()
+# extrafont::ttf_import()
+windowsFonts(`Palatino Linotype` = windowsFont("Palatino Linotype"))
+
+windowsFonts(`Equity Text A Tab` = windowsFont("Equity Text A Tab"))
+windowsFonts()
+d_beta <- ll %>% 
+  filter(g == "Broad Factor to Test Loading") %>% 
+  group_by(Broad) %>% 
+  nest() %>% 
+  mutate(bb = map(data, function(x) MASS::fitdistr(pull(x, Loading), densfun = "beta",start =  list(shape1 = 1, shape2 = 1))),
+         est = map(bb, "estimate"),
+         a = map_dbl(est, "shape1"),
+         b = map_dbl(est, "shape2"),
+         Broad = as.character(Broad),
+         mu = a / (a + b))
+
+crossing(Broad = as.character(d_beta$Broad),
+         x = seq(0,1,0.01)) %>% 
+  left_join(select(d_beta,Broad,a,b, mu), by = "Broad") %>% 
+  mutate(y = dbeta(x, shape1 = a, shape2 = b),
+         Broad = fct_reorder(Broad, mu)) %>% 
+  ggplot() + 
+  geom_rug(aes(x = Loading), data = d_all) +
+  geom_density(aes(x = Loading), data = d_g, color = NA, fill = "black") +
+    geom_density(aes(x = Loading, fill = Broad), data = filter(ll, g == "Broad Factor to Test Loading"), color = NA, alpha = 0.7) +
+  # geom_area(aes(x, y), color = NA, alpha = 0.5) + 
+  facet_grid(rows = vars(Broad), cols = vars(g), scales = "free_y") +
+  scale_y_continuous(NULL, breaks = NULL) +
+  scale_x_continuous(breaks = seq(0,1,0.2)) +
+  theme_light(base_family = "Palatino Linotype") +
+  theme(legend.position = "none", strip.text.y = element_text(angle = 0))
+  
+
+```
+
+```{r}
+library(simstandard)
+
+m <- '
+g =~ 0.81 * Gc + 0.96 * Gf + 0.81 * Gv + 0.87 * Ga + 0.80 * Gwm + 0.76 * Gl + 0.74 * Gr + 0.63 * Gs
+sGc1 =~ sqrt(1 - .85 ^ 2 - .15) * Gc_1
+sGc2 =~ sqrt(1 - .83 ^ 2 - .15) * Gc_2
+sGf1 =~ sqrt(1 - .81 ^ 2 - .15) * Gf_1
+sGf2 =~ sqrt(1 - .67 ^ 2 - .15) * Gf_2
+sGv1 =~ sqrt(1 - .64 ^ 2 - .15) * Gv_1
+sGv2 =~ sqrt(1 - .77 ^ 2 - .15) * Gv_2
+sGa1 =~ sqrt(1 - .54 ^ 2 - .15) * Ga_1
+sGa2 =~ sqrt(1 - .86 ^ 2 - .15) * Ga_2
+sGwm1 =~ sqrt(1 - .70 ^ 2 - .15) * Gwm_1
+sGwm2 =~ sqrt(1 - .69 ^ 2 - .15) * Gwm_2
+sGl1 =~ sqrt(1 - .77 ^ 2 - .15) * Gl_1
+sGl2 =~ sqrt(1 - .58 ^ 2 - .15) * Gl_2
+sGr1 =~ sqrt(1 - .54 ^ 2 - .15) * Gr_1
+sGr2 =~ sqrt(1 - .72 ^ 2 - .15) * Gr_2
+sGs1 =~ sqrt(1 - .55 ^ 2 - .15) * Gs_1
+sGs2 =~ sqrt(1 - .80 ^ 2 - .15) * Gs_2
+Gc =~ .85* Gc_1 + .83 * Gc_2 
+Gf =~ .81* Gf_1 + .67 * Gf_2 
+Gv =~ .64* Gv_1 + .77 * Gv_2 
+Ga =~ .54* Ga_1 + .86 * Ga_2 
+Gwm =~ .70* Gwm_1 + .69 * Gwm_2 
+Gl =~ .77* Gl_1 + .58 * Gl_2 
+Gr =~ .54* Gr_1 + .72 * Gr_2 
+Gs =~ .55* Gs_1 + .80 * Gs_2 
+'
+mm <- sim_standardized_matrices(m)
+R <- mm$Correlations$R_all ^ 2
+R["sGc1","Gc_Composite"]
+asdf <- function(x) {
+  
+  v <- R[c("g",paste0("d_",x)),paste0(x,"_Composite")] %>% 
+    formatC(2, format = "f") %>% 
+    str_remove("^0")
+  tibble(Broad = x, g = v[1], l = v[2])
+}
+
+asdf2 <- function(x) {
+  v <- R[paste0("s",x, c(1,2)),paste0(x,"_Composite")] 
+  tibble(Broad = x, s = sum(v) %>% formatC(2, format = "f") %>% str_remove("^0"))
+}
+
+asdf2("Gf")
+
+purrr::map_df(c("Gc","Gf", "Gv", "Ga", "Gwm", "Gl", "Gr", "Gs"), asdf2) %>% 
+  pull(s) %>% 
+  paste0(collapse = ", ")
+
+s <- purrr::map_df(c("Gc","Gf", "Gv", "Ga", "Gwm", "Gl", "Gr", "Gs"), asdf2) %>% 
+  pull(s)
+
+purrr::map_df(c("Gc","Gf", "Gv", "Ga", "Gwm", "Gl", "Gr", "Gs"), asdf) %>% 
+  mutate(s = s,
+         e = str_remove(formatC(1 - as.numeric(g) - as.numeric(l) - as.numeric(s), 2, format = "f"), "^0")) %>% 
+  pull(l) %>% 
+  paste0(collapse = ", ")
+bs <- c("Gc","Gf", "Gv", "Ga", "Gwm", "Gl", "Gr", "Gs")
+R[,"g_Composite",drop = F] %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  filter(rowname %in% paste0("d_", bs)) %>% 
+  separate(rowname, c("d","Broad")) %>% 
+  mutate(cs = cumsum(g_Composite) + R["g_Composite","g"],
+         east = paste0("\\coordinate (",Broad,"east) at ($(IQ.north east)!",cs,"!(IQ.south east)$);"),
+         west = paste0("\\coordinate (",Broad,"west) at ($(IQ.north west)!",cs,"!(IQ.south west)$);"),
+         prev = lag(Broad),
+         clip = paste0("\\path[clip] (",prev,"west) -- (",Broad,"west) -- (",Broad,"east) -- (",prev,"east) -- cycle;")) %>% 
+  pull(clip) %>% cat(sep = "\n")
+
+
+R[,"g_Composite",drop = F] %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  filter(rowname %in% c(paste0("s", bs, 1), paste0("s", bs, 2))) %>% 
+  pull(g_Composite) %>% sum
+
+R[,"g_Composite",drop = F] %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  filter(rowname %in% c(paste0("e_", bs, "_", 1), paste0("e_", bs, "_",2))) %>% 
+  pull(g_Composite) %>% sum
+
+x <- "Gc"
+validity <- function(x) {
+  R[,paste0("d_",x),drop = F] %>% 
+  as.data.frame() %>% 
+  rownames_to_column() %>% 
+  filter(rowname %in% paste0("d_", x,"_FS"))
+}
+
+validity(bs)
+  R[paste0("d_",bs,"_FS"),paste0("d_",bs),drop = F] %>% diag
+  
+  
+  ll$Study %>% unique
+```
+```{r WJR, eval=F}
+r <- matrix(c(
+	1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Memory for Names
+	279,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Memory for Sentences
+	213,254,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Visual Matching
+	167,255,191,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Incomplete Words
+	148,103,178,176,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Visual Closure
+	404,403,202,249,229,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Picture Vocabulary
+	275,324,280,205,161,323,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Analysis-Synthesis
+	542,343,267,192,205,382,376,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Visual-Auditory Learning
+	208,559,221,245,46,225,215,246,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Memory for Words
+	170,241,621,168,241,242,293,265,203,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Cross Out
+	245,323,245,367,133,323,265,332,335,246,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Sound Blending
+	293,216,212,123,234,256,233,299,155,257,212,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Picture Recognition
+	388,534,310,319,234,632,419,405,364,315,389,304,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Oral Vocabulary
+	306,382,306,236,205,325,484,376,227,305,275,269,458,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Concept Formation
+	721,236,155,168,127,383,269,460,173,123,242,236,359,284,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0, #Memory for Names Delayed
+	345,164,162,120,192,255,269,460,110,168,192,275,271,323,446,1000,0,0,0,0,0,0,0,0,0,0,0,0,0, #Visual-Auditory Learning-Delayed
+	259,416,384,227,129,255,368,321,401,309,316,206,396,354,225,182,1000,0,0,0,0,0,0,0,0,0,0,0,0, #Numbers Reversed
+	233,257,204,221,109,269,271,259,243,229,294,168,331,299,222,214,282,1000,0,0,0,0,0,0,0,0,0,0,0, #Sound Patterns
+	280,266,278,158,265,317,389,369,189,343,225,288,388,404,240,289,311,294,1000,0,0,0,0,0,0,0,0,0,0, #Spatial Relations
+	331,469,266,334,204,576,349,344,279,263,351,256,642,375,294,221,308,274,320,1000,0,0,0,0,0,0,0,0,0, #Listening Comprehension
+	379,454,334,228,242,522,455,445,310,344,355,322,639,496,377,330,403,304,456,526,1000,0,0,0,0,0,0,0,0, #Verbal Analogies
+	256,331,435,142,132,299,423,347,252,358,293,208,471,401,249,242,413,257,376,374,483,1000,0,0,0,0,0,0,0, #Calculation
+	337,416,419,206,175,439,470,388,312,388,360,273,603,489,313,268,438,315,486,524,631,655,1000,0,0,0,0,0,0, #Applied Problems
+	380,437,260,285,233,633,368,364,246,280,323,246,658,389,362,270,336,260,385,619,544,440,570,1000,0,0,0,0,0, #Science
+	371,477,298,262,200,626,386,374,270,278,323,255,693,411,348,245,332,256,344,628,595,508,617,702,1000,0,0,0,0, #Social Studies
+	390,447,308,281,252,622,343,414,297,284,355,283,665,359,368,283,326,282,340,572,598,427,536,633,672,1000,0,0,0, #Humanities
+	281,370,356,263,119,316,303,266,322,255,484,202,468,329,269,228,398,316,312,326,415,422,450,346,354,398,1000,0,0, #Word Attack
+	342,427,408,205,162,497,437,416,309,361,320,244,615,413,337,280,433,299,440,513,624,656,728,602,637,576,471,1000,0, #Quantitative Concepts
+	225,350,494,193,123,260,309,347,266,410,358,196,398,335,197,194,365,229,276,285,394,420,426,293,336,409,488,434,1000), nrow = 29, byrow = TRUE) #Writing Fluency
+rNames <- c("Memory for Names", "Memory for Sentences", "Visual Matching", "Incomplete Words", "Visual Closure", "Picture Vocabulary", "Analysis-Synthesis", "Visual-Auditory Learning", "Memory for Words", "Cross Out", "Sound Blending", "Picture Recognition", "Oral Vocabulary", "Concept Formation", "Memory for Names Delayed", "Visual-Auditory Learning-Delayed", "Numbers Reversed", "Sound Patterns", "Spatial Relations", "Listening Comprehension", "Verbal Analogies", "Calculation", "Applied Problems", "Science", "Social Studies", "Humanities", "Word Attack", "Quantitative Concepts", "Writing Fluency")
+rNames_c <- janitor::make_clean_names(rNames)
+colnames(r) <- rownames(r) <- rNames_c
+r <- (r + t(r))/1000
+diag(r) <- 1
+
+psych::fa.parallel(r, n.obs = 10000)
+
+m <- '
+g =~ Gc + Gf + Gv + Ga + Gwm + Gl + Gs
+Gc =~ picture_vocabulary + oral_vocabulary + listening_comprehension + science + social_studies + humanities
+Gf =~ analysis_synthesis + concept_formation 
+Gv =~ visual_closure + spatial_relations + picture_recognition
+Ga =~ incomplete_words + sound_blending + sound_patterns
+Gwm =~ memory_for_words + numbers_reversed + memory_for_sentences
+Gl =~ visual_auditory_learning + memory_for_names
+Gs =~ visual_matching + cross_out 
+'
+rNames
+library(lavaan)
+cfa(m, sample.cov = r, sample.nobs = 10000) %>% summary(standardized = T)
+
+solve(r[c("picture_vocabulary", "oral_vocabulary", "listening_comprehension", "science", "social_studies", "humanities","analysis_synthesis" , "concept_formation"), c("picture_vocabulary", "oral_vocabulary", "listening_comprehension", "science", "social_studies", "humanities","analysis_synthesis" , "concept_formation")])
+
+tibble(rNames = rNames)
+```
+
+# Simulate Data
+
+## Reliability
+
+```{r Reliability, eval = T}
+library(readxl)
+
+# get broad classifications
+d_broad <- ll %>% select(Subtest, Battery, Broad) %>% unique %>% 
+  mutate(Battery = as.character(Battery))
+
+# function to process reliability
+rxl <- function(s) {
+  read_excel(path = "Reliability.xlsx", sheet = s) %>% 
+  gather("Age", "rxx", -Test, -Battery,-Subtest)
+}
+# Get sheets
+s <- readxl::excel_sheets("Reliability.xlsx")
+# Reliability coef
+d_rxx <- map_df(s, rxl) %>% 
+  left_join(d_broad, by = c("Subtest", "Battery"))
+
+d_rxx %>% 
+  mutate(Broad = fct_reorder(Broad, rxx, .fun = mean, na.rm = T)) %>% 
+  filter(!is.na(Broad)) %>% 
+  filter(!is.na(rxx)) %>% 
+  ggplot(aes(Broad, rxx)) + 
+  # ggbeeswarm::geom_quasirandom(pch = 16, size = 0.25, width = 0.4, alpha = 0.5) +
+  geom_violin(color = NA, fill = "gray80", alpha = 0.75, width = 1.2) +
+  stat_summary(fun.data = mean_se, size = 0.25, color = "firebrick") +
+  # geom_text(data = . %>% group_by(Broad) %>% summarize(rxx = mean(rxx, na.rm = T)),aes(label = formatC(rxx, 2, format = "f") %>% str_remove("^0")), color = "white", vjust = -0.5, fontface = "bold", size = 9,, family = "serif") +
+  geom_text(data = . %>% group_by(Broad) %>% summarize(rxx = mean(rxx, na.rm = T)),aes(label = formatC(rxx, 2, format = "f") %>% str_remove("^0")), color = "firebrick", vjust = -0.5, size= 9, family = "serif") +
+  scale_y_continuous("Reliability Coefficients",limits = c(0,1), breaks = seq(0,1,0.1), expand = c(0,0)) +
+  scale_x_discrete(NULL) +
+  theme_minimal(base_size = 26, base_family = "serif")
+ggsave("Reliability.svg", width = 8, height = 8)
+# rxx %>% dplyr::filter(Broad == "Gv") %>% arrange(rxx)
+```
+
+```{r Increase Indicators, eval = T}
+
+get_rxx <- function(Broad, Loading) {
+  d_rxx %>% filter(Broad == Broad) %>% 
+    filter(rxx > Loading ^ 2) %>% 
+    sample_n(1) %>% 
+    pull(rxx)
+}
+
+get_loading <- function(Broad, rxx, Narrow_Loading) {
+  ll %>% filter(Broad == Broad) %>% 
+    filter(Loading ^ 2 < rxx) %>%
+    filter(Loading / Narrow_Loading < 1) %>% 
+    sample_n(1) %>% 
+    pull(Loading)
+}
+
+
+sample_n_indicators <- function(
+  n_indicator = 3,
+  n_narrow = 3,
+  level = 2, 
+  free = FALSE) {
+  require(tidyverse)
+  require(magrittr)
+  
+  # g
+  d_g <- filter(ll, g == "g to Broad Factor Loading") %>% 
+    group_by(Broad) %>% 
+    sample_n(size = 1) %>% 
+    ungroup() %>% 
+    mutate(
+      Broad = as.character(Broad) %>% str_remove("^\\."),
+      Loading = if_else(Loading == 1, 0.99, Loading),
+      struc = paste0(Loading, " * ", Broad)) 
+  
+  m_g <- d_g %>% 
+    summarise(struc = paste0("g =~ ", paste0(struc, collapse = " + "))) %>% 
+    pull(struc)
+  
+  m_g_free <- d_g %>% 
+    summarise(struc = paste0("g =~ ", paste0(Broad, collapse = " + "))) %>% 
+    pull(struc) 
+    
+  cnt <- 1
+  d_struct <- tibble(Broad = d_g$Broad)
+  
+  if (level == 2) {
+    d_indicators <- filter(ll, g == "Broad Factor to Test Loading") %>% 
+    group_by(Broad) %>% 
+    sample_n(size = n_indicator, replace = TRUE) %>% 
+    mutate(rid = row_number(),
+           Indicator = paste0(Broad,"_", rid), 
+           Loading = if_else(Loading == 1, 0.99, Loading),
+           load_ind = paste0(Loading, " * ", Indicator), 
+           s = paste0("s_", Indicator)) %>% 
+    ungroup() %>% 
+    mutate(rxx = map2_dbl(Broad, Loading, get_rxx), 
+           s_load = sqrt(rxx - Loading ^ 2))
+  }
+  
+  if (level == 3) {
+    indicator_nums <- rep(1:n_indicator) %>% rep(n_narrow) %>% rep(8) 
+    narrow_nums <- rep(1:n_narrow, each = n_indicator) %>% 
+      rep(8)
+    
+    narrow_loading <- rbeta_ms(8 * n_narrow, mu = 0.90, sigma = 0.03) %>% rep(each = n_indicator)
+    
+    d_indicators <- d_rxx %>%
+      filter(!is.na(Broad) & !is.na(rxx)) %>%
+      group_by(Broad) %>%
+      sample_n(size = n_indicator * n_narrow, replace = TRUE) %>%
+      ungroup %>%
+      mutate(
+        Indicator = paste0(Broad, 
+                           "_", 
+                           narrow_nums, 
+                           "_", 
+                           indicator_nums),
+        Narrow = paste0(Broad, 
+                        "_", 
+                        narrow_nums)
+      ) %>%
+      mutate(Narrow_Loading = narrow_loading, 
+             Indicator_Loading = pmap_dbl(list(Broad, rxx, Narrow_Loading), get_loading),
+             s = paste0("s_", Indicator),
+             s_load = sqrt(rxx - Indicator_Loading ^ 2)
+             )
+
+  }
+  
+  # Specific 
+ m_specific <-  d_indicators %>% 
+    select(s, s_load, Indicator) %>% 
+    mutate(specific = paste0(s, " =~ ", s_load, " * ", Indicator)) %>% 
+    pull(specific) %>% 
+    paste0(collapse = "\n") 
+  
+ # Broad
+ if (level == 2) {
+   m_broad <-   d_indicators %>%
+     group_by(Broad) %>%
+     summarise(meas = paste0(load_ind, collapse = " + ")) %>%
+     mutate(meas = paste0(Broad, " =~ ", meas)) %>%
+     pull(meas) %>%
+     paste0(collapse = "\n")
+ }
+
+   if (level == 3) {
+   m_broad <-   d_indicators %>%
+     select(Broad, Narrow, Narrow_Loading) %>% 
+     unique() %>% 
+     mutate(load_ind = paste0(Narrow_Loading, " * ", Narrow)) %>% 
+     group_by(Broad) %>% 
+     summarise(meas = paste0(load_ind, collapse = " + ")) %>%
+     mutate(meas = paste0(Broad, " =~ ", meas)) %>%
+     pull(meas) %>%
+     paste0(collapse = "\n")
+   
+   m_narrow <-   d_indicators %>%
+     select(Narrow, Indicator, Indicator_Loading) %>% 
+     mutate(load_ind = paste0(Indicator_Loading, " * ", Indicator)) %>% 
+     group_by(Narrow) %>% 
+     summarise(meas = paste0(load_ind, collapse = " + ")) %>%
+     mutate(meas = paste0(Narrow, " =~ ", meas)) %>%
+     pull(meas) %>%
+     paste0(collapse = "\n")
+ }
+  
+  m_broad_free <-   d_indicators %>% 
+   group_by(Broad) %>% 
+    summarise(meas = paste0(Indicator, collapse = " + ")) %>% 
+    mutate(meas = paste0(Broad, " =~ ",meas)) %>% 
+    pull(meas) %>% 
+    paste0(collapse = "\n")
+  
+  
+  if (free) {
+    paste0(m_g_free,"\n", m_broad_free)
+    } else {
+    paste0(m_g,"\n", m_broad, "\n", m_specific)
+      }
+  
+  
+  # fit <- simstandard::sim_standardized_matrices(m)
+  
+}
+
+
+```
+
+```{r omega}
+get_omega <- function(m) {
+  
+  # model matrices
+  mm <- simstandard::sim_standardized_matrices(m)
+  
+  # Variable names
+  v_observed <- mm$v_names$v_observed
+  v_specific <- paste0("s_", v_observed)
+  v_error <- paste0("e_", v_observed)
+  v_latent <- setdiff(mm$v_names$v_latent, v_specific)
+  v_group <- setdiff(v_latent, "g")
+  v_latent_FS <- paste0(v_latent,"_FS")
+  v_disturbance <- paste0("d_", v_group)
+  v_disturbance_FS <- paste0("d_", v_group,"_FS")
+  
+  validity_latent <- diag(mm$Correlations$R_all[v_latent_FS,v_latent]) ^ 2
+  names(validity_latent) <- v_latent
+  
+  validity_disturbance <- diag(mm$Correlations$R_all[v_disturbance_FS,v_disturbance]) ^ 2
+  names(validity_disturbance) <- v_group
+  # Path coeficients
+  A <- mm$RAM_matrices$A
+  A_group <- A[v_observed, v_group, drop = F]
+  A_g <- A[v_group, "g", drop = F]
+  SL_g <- A_group %*% A_g
+  S_group <-
+    mm$RAM_matrices$S[v_group, v_group]
+  theta_2 <- sqrt(S_group)
+  A_specific <- mm$RAM_matrices$A[v_observed, v_specific]
+  theta_1 <- sqrt(mm$RAM_matrices$S[v_observed, v_observed])
+  colnames(theta_1) <- v_error
+  SL_group <- A_group %*% theta_2
+  cbind(SL_g, SL_group)
+  full_matrix <- cbind(SL_g, SL_group, A_specific, theta_1)
+  scale_structure <- ceiling(SL_group)
+  
+  # Variances for total
+  Vx <- sum(mm$Correlations$R[v_observed, v_observed])
+  Vg <- sum(SL_g %*% t(SL_g))
+  VA <- sum(SL_group %*% t(SL_group))
+  VD <- sum(A_specific %*% A_specific)
+  VE <- sum(mm$RAM_matrices$S[v_observed, v_observed])
+  # Vg + VA + VD + VE
+  
+  # Variances for subscale
+  V_group_error <-
+    colSums(t(scale_structure) %*% theta_1 %*% t(theta_1) %*% scale_structure)
+  V_group_specific <-
+    colSums(t(scale_structure) %*% A_specific %*% t(A_specific) %*% scale_structure)
+  V_group <-
+    colSums(t(scale_structure) %*% SL_group %*% t(SL_group) %*% scale_structure)
+  V_group_g <- colSums((SL_g %*% rep(1, 8)) * scale_structure) ^ 2
+  V_group_Vx <-
+    diag(t(scale_structure) %*% mm$Correlations$R[v_observed, v_observed] %*% scale_structure)
+  
+  # Omega for total
+  omega_total_reliability <- (Vg + VA + VD) / Vx
+  omega_total_latent <- (Vg + VA) / Vx
+  omega_total_general <- Vg / Vx
+  omega_total_general_asymptotic <- Vg  / (VA + Vg)
+  omega_total_group <- VA  / Vx
+  omega_total_group_asymptotic <- VA  / (VA + Vg)
+  omega_total_specific <- VD  / Vx
+  omega_total_error <- VE  / Vx
+  
+  # Omega for group factors
+  omega_subscale_reliability <-
+    (V_group_g + V_group + V_group_specific) / V_group_Vx
+  
+  omega_subscale_latent <- (V_group_g + V_group) / V_group_Vx
+  
+  omega_subscale_general <- (V_group_g) / V_group_Vx
+  
+  V_group_Vx_asymptotic <- V_group_Vx - V_group_specific - V_group_error
+  omega_subscale_general_asymptotic = V_group_g / V_group_Vx_asymptotic
+  
+  omega_subscale_group <- (V_group) / V_group_Vx
+  
+  omega_subscale_group_asymptotic <-
+    (V_group) / V_group_Vx_asymptotic
+  
+    omega_subscale_specific <-
+    V_group_specific / V_group_Vx
+  
+  omega_subscale_error <-
+    V_group_error / V_group_Vx
+  
+  omega_subscale_group_specific <-
+    (V_group + V_group_specific) / V_group_Vx
+  
+  omega_subscale_group_specific_asymptotic <-
+    (V_group + V_group_specific) / V_group_Vx_asymptotic
+  
+  tribble(~construct,   ~type,    ~omega,  ~asymptotic,
+          "Total", "reliability", omega_total_reliability, 1,
+          "Total", "latent",      omega_total_latent,      1,
+          "Total", "general",     omega_total_general,     omega_total_general_asymptotic,
+          "Total", "group",       omega_total_group, omega_total_group_asymptotic,
+          "Total", "specific",    omega_total_specific, 0,
+          "Total", "error",       omega_total_error, 0) %>% 
+    bind_rows(
+      tibble(construct = names(omega_subscale_reliability),
+             type = "reliability",
+             omega = omega_subscale_reliability,
+             asymptotic = 1),
+      tibble(construct = names(omega_subscale_latent),
+             type = "latent",
+             omega = omega_subscale_latent,
+             asymptotic = 1),
+      tibble(construct = names(omega_subscale_general),
+             type = "general",
+             omega = omega_subscale_general,
+             asymptotic = omega_subscale_general_asymptotic),
+      tibble(construct = names(omega_subscale_group),
+             type = "group",
+             omega = omega_subscale_group,
+             asymptotic = omega_subscale_group_asymptotic),
+      tibble(construct = names(omega_subscale_specific),
+             type = "specific",
+             omega = omega_subscale_specific,
+             asymptotic = 0),
+      tibble(construct = names(omega_subscale_error),
+             type = "error",
+             omega = omega_subscale_error,
+             asymptotic = 0),
+      tibble(construct = names(validity_latent),
+             type = "factor score latent",
+             omega = validity_latent,
+             asymptotic = NA),
+      tibble(construct = names(validity_disturbance),
+             type = "factor score disturbance",
+             omega = validity_disturbance,
+             asymptotic = NA)
+    ) 
+
+
+
+
+  
+ }
+
+
+library(furrr)
+library(tictoc)
+library(directlabels)
+sample_n_indicators(4) %>% 
+  get_omega() 
+
+tic()
+max_n <- 10
+plan(multiprocess)
+n = rep(1:max_n, 100)
+m = future_map(n, sample_n_indicators, .progress = T)
+omega <- future_map(m, get_omega, .progress = T)
+d_omega <- tibble(n = n, m = m, omega = omega)
+toc()
+
+# tic()
+# plan(multiprocess)
+# d_omega <- tibble(n = rep(2:50, 50)) %>% 
+#   mutate(m = future_map(n, sample_n_indicators),
+#          omega = future_map(m, get_omega))
+# toc()
+d <- d_omega %>% 
+  # mutate(n = factor(n)) %>% 
+  unnest(omega) %>%
+  group_by(n, type, construct) %>% 
+  summarise(omega = mean(omega),
+            asymptotic = mean(asymptotic))
+
+d <- d_omega %>% 
+  unnest(omega)
+bind_rows(
+  filter(d, construct == "Total" & type == "general") %>% 
+  mutate(construct = "g", type = "Composite—\nLatent"),
+  filter(d, construct != "Total" & type == "latent") %>% 
+  mutate(type = "Composite—\nLatent"),
+  filter(d, construct != "Total" & type == "factor score latent") %>% 
+  mutate(type = "Factor Score—\nLatent"),
+  filter(d, construct != "Total" & type == "group") %>% 
+  mutate(type = "Composite—\nDisturbance"),
+  filter(d, construct != "Total" & type == "factor score disturbance") %>% 
+  mutate(type = "Factor Score—\nDisturbance")) %>% 
+  mutate(type = fct_inorder(type)) %>% 
+  ggplot(aes(n,omega, color = construct)) + 
+  geom_jitter(alpha = 0.15, pch = 16, size = 0.5) +
+  geom_smooth(se = F) + 
+  scale_x_continuous("Indicators per Broad Factor",
+                     limits = c(0, max_n),
+                     breaks = seq(0,max_n, 2)) +
+  scale_y_continuous("Omega",
+                     limits = c(0,1), 
+                     breaks = seq(0,1,0.2)) + 
+  annotate(x = max_n + 1, y = 0, geom = "blank") +
+  facet_grid(rows = vars(construct), cols = vars(type)) +
+  theme_light(base_family = "Equity Text A", base_size = 20) +
+  theme(legend.position = "none", strip.text.y = element_text(angle = 0))
+
+ggsave("Indicators_per_factor.svg", width = 8, height = 15)
+```
+
+
+```{r}
+
+ll %>% select(Broad, Loading, Battery) %>% 
+  rbind(d_rxx %>% rename(Loading = rxx) %>% select(Broad, Loading, Battery))
+ggplot(aes(Broad,Loading)) +
+  # geom_boxplot(outlier.shape = NA) + 
+  geom_violin(color = "white", scale = "width", width = 0.8, fill = "gray70", alpha = 0.8) +
+  geom_segment(data = d_median, aes(x = as.numeric(Broad) - 0.5 + if_else(g == "g to Broad Factor Loading",-8,0), xend = as.numeric(Broad) + 0.5 + if_else(g == "g to Broad Factor Loading",-8,0), yend = Loading), color = "white") +
+  ggbeeswarm::geom_quasirandom(aes(color = Battery), pch = 16, size = 0.8, width = 0.35) +
+  geom_text(data = d_median, aes(label = formatC(Loading,2, format = "f") %>% str_remove("^0")), vjust = -0.3, family = "Equity Text A Tab", color = "gray20") +
+  facet_grid(cols = vars(g),scales = "free") + 
+  scale_y_continuous("CFA Loading (with Medians)", limits = c(0,1), breaks = seq(0,1,0.2)) + 
+  scale_x_discrete(NULL) +
+  theme_light(base_family = "Equity Text A Tab",base_size = 24) +
+  theme(legend.position = "top", legend.box.spacing = unit(0,"cm"), title = element_text(size = 15), legend.box.margin = margin(0,0,0,0)) + 
+  scale_color_discrete(guide = ggplot2::guide_legend(override.aes = list(size = 4))) + ggtitle("Figure 1. CFA Loadings for Higher-Order CHC Constructs")
+```
+
+
+```{r}
+
+```
+
